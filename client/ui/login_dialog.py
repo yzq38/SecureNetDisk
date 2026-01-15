@@ -113,7 +113,7 @@ class LoginDialog(QDialog):
         self._pending_trust_data = None  # 待确认信任的数据
         self.setWindowTitle("安全网盘 - 登录")
         self.setMinimumSize(400, 600)
-        self.resize(900, 750)  # 初始大小
+        self.resize(900, 950)  # 初始大小
         self.setStyleSheet(StyleSheet.LOGIN)
         self._init_ui()
         
@@ -147,25 +147,11 @@ class LoginDialog(QDialog):
         content_layout.setContentsMargins(40, 0, 40, 20)  # 左右边距40px，底部边距20px
         content_layout.setSpacing(16)
 
-        logo = QLabel("🔐 安全网盘")
-        logo.setObjectName("logoLabel")
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet("""
-            QLabel {
-                font-size: 28px;
-                font-weight: bold;
-                color: black;
-                text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            }
-        """)
-        content_layout.addWidget(logo)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(16)
-        
-        # Logo 图标
-        logo_layout = QHBoxLayout()
+        # Logo 图标 + 文字 (水平居中)
+        logo_container = QWidget()
+        logo_layout = QHBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.setSpacing(12)
         logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         icon_path = Path(__file__).parent.parent / "resources" / "icon.png"
@@ -173,15 +159,28 @@ class LoginDialog(QDialog):
             # 设置窗口图标
             self.setWindowIcon(QIcon(str(icon_path)))
             # Logo 图片
-            logo_pixmap = QPixmap(str(icon_path)).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_pixmap = QPixmap(str(icon_path)).scaled(
+                56, 56, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
             logo_icon = QLabel()
             logo_icon.setPixmap(logo_pixmap)
             logo_layout.addWidget(logo_icon)
         
         logo_text = QLabel("安全网盘")
-        logo_text.setObjectName("logoLabel")
+        logo_text.setStyleSheet("""
+            QLabel {
+                font-size: 32px;
+                font-weight: bold;
+                color: white;
+                background: transparent;
+            }
+        """)
         logo_layout.addWidget(logo_text)
-        layout.addLayout(logo_layout)
+        
+        content_layout.addWidget(logo_container, alignment=Qt.AlignmentFlag.AlignCenter)
+        
         
         # 连接状态标签
         self.connection_status = QLabel("⚪ 正在连接服务器...")
@@ -506,7 +505,7 @@ class LoginDialog(QDialog):
             # 保存到配置
             app_config.host = host
             app_config.port = port
-            app_config.add_to_history(f"{host}:{port}")  # 保存带端口的完整地址
+            app_config.add_to_history(host, port)  # 保存带端口的完整地址
             app_config.save()
 
             # 更新状态标签
@@ -562,11 +561,8 @@ class LoginDialog(QDialog):
         return page
 
     def _on_host_changed(self, text):
-        """Handle host text change to auto-fill port if format is Host:Port"""
-        if ':' in text:
-            parts = text.split(':')
-            if len(parts) == 2 and parts[1].isdigit():
-                self.port_input.setText(parts[1])
+        """Handle host text change - no longer needed as port is part of host string"""
+        pass  # Port is now included in host:port format
 
     def _try_initial_connect(self):
         """启动时尝试静默连接"""
@@ -593,43 +589,26 @@ class LoginDialog(QDialog):
 
     def _ensure_connection(self) -> bool:
         """确保已连接到配置的服务器"""
-        # Parse host from combo box (remove port if present)
-        raw_host = self.host_combo.currentText().strip()
-        if ':' in raw_host:
-            host = raw_host.split(':')[0]
-        else:
-            host = raw_host
-            
-        try:
-            port = int(self.port_input.text().strip())
-        except ValueError:
-            QMessageBox.warning(self, "配置错误", "端口必须是数字")
-            return False
+        # 使用当前配置的服务器信息（已通过设置对话框或初始连接设置）
+        host = self.network.server_info.host or app_config.host
+        port = self.network.server_info.port or app_config.port
 
-        # 如果当前连接仍然有效且配置未变，直接重用
-        settings_unchanged = (self.network.server_info.host == host and 
-                             self.network.server_info.port == port)
-        
-        if self.network.is_connected and settings_unchanged:
+        # 如果已连接，直接返回
+        if self.network.is_connected:
             if self.network.ping():
                 return True
-        
-        # 仅在必要时断开既有连接（配置变更或实质连通性失败）
-        if self.network.is_connected:
+            # ping失败，重新连接
             self.network.disconnect()
 
         # 更新配置并重连
-        self._update_status(False, "正在重新连接...")
-        
-        if self.network.is_connected:
-            self.network.disconnect()
+        self._update_status(False, "正在连接服务器...")
 
         self.network.server_info.host = host
         self.network.server_info.port = port
         
         if not self.network.connect():
             self._update_status(False, f"连接失败: {host}:{port}")
-            QMessageBox.critical(self, "连接失败", f"无法连接到服务器 {host}:{port}")
+            QMessageBox.critical(self, "连接失败", f"无法连接到服务器 {host}:{port}\n请检查服务器设置")
             return False
             
         self._update_status(True, f"已连接到 {host}:{port}")
@@ -641,12 +620,6 @@ class LoginDialog(QDialog):
         app_config.port = self.network.server_info.port
         # Add to history
         app_config.add_to_history(app_config.host, app_config.port)
-        # Update combo box if needed (optional, but good for UX)
-        current_entry = f"{app_config.host}:{app_config.port}"
-        if self.host_combo.findText(current_entry) == -1:
-            self.host_combo.insertItem(0, current_entry)
-        self.host_combo.setCurrentText(current_entry)
-        
         app_config.save()
 
     def _do_login(self):
@@ -923,19 +896,43 @@ class LoginDialog(QDialog):
         self.recovery_email_container = QWidget()
         email_layout = QVBoxLayout(self.recovery_email_container)
         email_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.recovery_email_username = QLineEdit()
         self.recovery_email_username.setPlaceholderText("用户名")
+        self.recovery_email_username.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+        """)
         email_layout.addWidget(self.recovery_email_username)
-        
+
         self.recovery_email_input = QLineEdit()
         self.recovery_email_input.setPlaceholderText("邮箱地址")
+        self.recovery_email_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+        """)
         email_layout.addWidget(self.recovery_email_input)
-        
+
         code_row = QHBoxLayout()
         self.recovery_code_input = QLineEdit()
         self.recovery_code_input.setPlaceholderText("验证码")
         self.recovery_code_input.setMaxLength(6)
+        self.recovery_code_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+        """)
         code_row.addWidget(self.recovery_code_input, 2)
         
         self.recovery_get_code_btn = QPushButton("获取验证码")
