@@ -113,7 +113,7 @@ class LoginDialog(QDialog):
         self._pending_trust_data = None  # 待确认信任的数据
         self.setWindowTitle("安全网盘 - 登录")
         self.setMinimumSize(400, 600)
-        self.resize(900, 950)  # 初始大小
+        self.resize(900, 835)  # 初始大小
         self.setStyleSheet(StyleSheet.LOGIN)
         self._init_ui()
         
